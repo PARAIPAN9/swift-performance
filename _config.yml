@@ -1,0 +1,25 @@
+title: Swift Performance
+description: In-depth articles on Swift performance — ARC, value types, concurrency, and compiler optimizations.
+url: "https://paraipan9.github.io"
+baseurl: ""
+
+author:
+  name: Paraipan
+  github: PARAIPAN9
+
+permalink: /:year/:month/:day/:title/
+markdown: kramdown
+highlighter: rouge
+
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - README.md

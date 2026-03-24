@@ -1,0 +1,25 @@
+---
+layout: default
+---
+
+<div class="hero">
+  <h1>Swift<br>Performance</h1>
+  <p>In-depth articles on making Swift faster — ARC, value types, dynamic dispatch, concurrency, and compiler optimizations.</p>
+</div>
+
+<div class="article-list">
+  <h2>Articles</h2>
+
+  {% for post in site.posts %}
+  <article class="article-card">
+    <div class="article-meta">{{ post.date | date: "%B %-d, %Y" }}{% if post.categories.size > 0 %} &nbsp;·&nbsp; {{ post.categories | join: ", " }}{% endif %}</div>
+    <h3><a href="{{ post.url | relative_url }}">{{ post.title }}</a></h3>
+    {% if post.description %}<p>{{ post.description }}</p>{% elsif post.excerpt %}<p>{{ post.excerpt | strip_html | truncatewords: 30 }}</p>{% endif %}
+    <a class="read-more" href="{{ post.url | relative_url }}">Read article →</a>
+  </article>
+  {% endfor %}
+
+  {% if site.posts.size == 0 %}
+  <p style="color: #6e6e73; font-size: 15px;">No articles yet — first one coming soon.</p>
+  {% endif %}
+</div>

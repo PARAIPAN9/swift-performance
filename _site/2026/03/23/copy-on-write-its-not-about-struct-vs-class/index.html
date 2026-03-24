@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Copy-on-Write: It's Not About Struct vs Class · Swift Performance</title>
+  <meta name="description" content="Most Swift performance articles frame CoW as a struct optimization. It's not. It's a semantics decision and the benchmark data shows exactly when it pays off.">
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <link type="application/atom+xml" rel="alternate" href="http://localhost:4000/feed.xml" title="Swift Performance" />
+  <!-- Begin Jekyll SEO tag v2.7.1 -->
+<title>Copy-on-Write: It’s Not About Struct vs Class | Swift Performance</title>
+<meta name="generator" content="Jekyll v4.4.1" />
+<meta property="og:title" content="Copy-on-Write: It’s Not About Struct vs Class" />
+<meta name="author" content="Paraipan" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Most Swift performance articles frame CoW as a struct optimization. It’s not. It’s a semantics decision and the benchmark data shows exactly when it pays off." />
+<meta property="og:description" content="Most Swift performance articles frame CoW as a struct optimization. It’s not. It’s a semantics decision and the benchmark data shows exactly when it pays off." />
+<link rel="canonical" href="http://localhost:4000/2026/03/23/copy-on-write-its-not-about-struct-vs-class/" />
+<meta property="og:url" content="http://localhost:4000/2026/03/23/copy-on-write-its-not-about-struct-vs-class/" />
+<meta property="og:site_name" content="Swift Performance" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-03-23T00:00:00+01:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Copy-on-Write: It’s Not About Struct vs Class" />
+<script type="application/ld+json">
+{"dateModified":"2026-03-23T00:00:00+01:00","datePublished":"2026-03-23T00:00:00+01:00","headline":"Copy-on-Write: It’s Not About Struct vs Class","author":{"@type":"Person","name":"Paraipan"},"url":"http://localhost:4000/2026/03/23/copy-on-write-its-not-about-struct-vs-class/","description":"Most Swift performance articles frame CoW as a struct optimization. It’s not. It’s a semantics decision and the benchmark data shows exactly when it pays off.","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"http://localhost:4000/2026/03/23/copy-on-write-its-not-about-struct-vs-class/"},"@context":"https://schema.org"}</script>
+<!-- End Jekyll SEO tag -->
+
+</head>
+<body>
+  <header class="site-header">
+  <div class="header-inner">
+    <a class="site-title" href="/">Swift Performance</a>
+    <nav>
+      <a href="/">Articles</a>
+      <a href="/about">About</a>
+    </nav>
+  </div>
+</header>
+
+  <main class="page-content">
+    <article class="post">
+  <header class="post-header">
+    <div class="post-meta">March 23, 2026 &nbsp;·&nbsp; ARC, Value/Reference Types, Copy-on-Write</div>
+    <h1>Copy-on-Write: It's Not About Struct vs Class</h1>
+    <p class="post-description">Most Swift performance articles frame CoW as a struct optimization. It's not. It's a semantics decision and the benchmark data shows exactly when it pays off.</p>
+  </header>
+
+  <div class="post-content">
+    <p>A common misconception in Swift performance discussions is that copy-on-write is a way to make structs behave like classes for performance. It isn’t. CoW is a <strong>semantics decision</strong>. You’re choosing when storage is duplicated, not choosing between value and reference semantics.</p>
+
+<p>This article walks through a concrete implementation, explains what happens at the ARC level, and backs every claim with benchmark data.</p>
+
+<h2 id="the-problem-with-heap-heavy-structs">The problem with heap-heavy structs</h2>
+
+<p>Consider a struct with 10 fields, all heap-allocated:</p>
+
+<div class="language-swift highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">struct</span> <span class="kt">HeavyStruct</span> <span class="p">{</span>
+    <span class="kd">public</span> <span class="k">var</span> <span class="nv">name</span><span class="p">:</span> <span class="kt">String</span>           <span class="c1">// heap buffer + ARC</span>
+    <span class="kd">public</span> <span class="k">var</span> <span class="nv">description</span><span class="p">:</span> <span class="kt">String</span>
+    <span class="kd">public</span> <span class="k">var</span> <span class="nv">identifier</span><span class="p">:</span> <span class="kt">String</span>
+    <span class="kd">public</span> <span class="k">var</span> <span class="nv">category</span><span class="p">:</span> <span class="kt">String</span>
+    <span class="kd">public</span> <span class="k">var</span> <span class="nv">tags</span><span class="p">:</span> <span class="p">[</span><span class="kt">String</span><span class="p">]</span>         <span class="c1">// heap array + ARC retain per element</span>
+    <span class="kd">public</span> <span class="k">var</span> <span class="nv">keywords</span><span class="p">:</span> <span class="p">[</span><span class="kt">String</span><span class="p">]</span>
+    <span class="kd">public</span> <span class="k">var</span> <span class="nv">authors</span><span class="p">:</span> <span class="p">[</span><span class="kt">String</span><span class="p">]</span>
+    <span class="kd">public</span> <span class="k">var</span> <span class="nv">relatedIDs</span><span class="p">:</span> <span class="p">[</span><span class="kt">String</span><span class="p">]</span>
+    <span class="kd">public</span> <span class="k">var</span> <span class="nv">scores</span><span class="p">:</span> <span class="p">[</span><span class="kt">Int</span><span class="p">]</span>          <span class="c1">// heap array</span>
+    <span class="kd">public</span> <span class="k">var</span> <span class="nv">metadata</span><span class="p">:</span> <span class="p">[</span><span class="kt">Int</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>When you copy this struct, Swift retains every reference individually. That’s roughly <strong>10+ ARC retain calls per copy</strong>. One for each <code class="language-plaintext highlighter-rouge">String</code>, one for each <code class="language-plaintext highlighter-rouge">Array</code> buffer.</p>
+
+<p>The retains are cheap individually, but they add up.</p>
+
+<h2 id="what-cow-actually-does">What CoW actually does</h2>
+
+<p>Copy-on-Write moves all fields into a single class instance (<code class="language-plaintext highlighter-rouge">_Storage</code>) and wraps it in the struct. Basically, it is a struct, backed by a class:</p>
+
+<div class="language-swift highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="kd">struct</span> <span class="kt">HeavyCOWStruct</span> <span class="p">{</span>
+
+    <span class="kd">final</span> <span class="kd">class</span> <span class="kt">Storage</span> <span class="p">{</span>
+        <span class="k">var</span> <span class="nv">name</span><span class="p">:</span> <span class="kt">String</span>
+        <span class="k">var</span> <span class="nv">description</span><span class="p">:</span> <span class="kt">String</span>
+        <span class="k">var</span> <span class="nv">identifier</span><span class="p">:</span> <span class="kt">String</span>
+        <span class="k">var</span> <span class="nv">category</span><span class="p">:</span> <span class="kt">String</span>
+        <span class="k">var</span> <span class="nv">tags</span><span class="p">:</span> <span class="p">[</span><span class="kt">String</span><span class="p">]</span>
+        <span class="k">var</span> <span class="nv">keywords</span><span class="p">:</span> <span class="p">[</span><span class="kt">String</span><span class="p">]</span>
+        <span class="k">var</span> <span class="nv">authors</span><span class="p">:</span> <span class="p">[</span><span class="kt">String</span><span class="p">]</span>
+        <span class="k">var</span> <span class="nv">relatedIDs</span><span class="p">:</span> <span class="p">[</span><span class="kt">String</span><span class="p">]</span>
+        <span class="k">var</span> <span class="nv">scores</span><span class="p">:</span> <span class="p">[</span><span class="kt">Int</span><span class="p">]</span>
+        <span class="k">var</span> <span class="nv">metadata</span><span class="p">:</span> <span class="p">[</span><span class="kt">Int</span><span class="p">]</span>
+
+        <span class="kd">func</span> <span class="nf">copy</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kt">Storage</span> <span class="p">{</span> <span class="o">...</span> <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="kd">private</span> <span class="k">var</span> <span class="nv">_storage</span><span class="p">:</span> <span class="kt">Storage</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>Now copying the struct is <strong>1 ARC retain</strong> on <code class="language-plaintext highlighter-rouge">_storage</code>, regardless of how many fields it contains. The actual buffer duplication is deferred to the first mutation and only if another owner of the same storage exists:</p>
+
+<div class="language-swift highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">public</span> <span class="k">var</span> <span class="nv">name</span><span class="p">:</span> <span class="kt">String</span> <span class="p">{</span>
+    <span class="k">get</span> <span class="p">{</span> <span class="n">_storage</span><span class="o">.</span><span class="n">name</span> <span class="p">}</span>
+    <span class="k">set</span> <span class="p">{</span>
+        <span class="c1">// Only allocates if someone else holds a reference to _storage.</span>
+        <span class="k">if</span> <span class="o">!</span><span class="nf">isKnownUniquelyReferenced</span><span class="p">(</span><span class="o">&amp;</span><span class="n">_storage</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">_storage</span> <span class="o">=</span> <span class="n">_storage</span><span class="o">.</span><span class="nf">copy</span><span class="p">()</span>
+        <span class="p">}</span>
+        <span class="n">_storage</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">newValue</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">isKnownUniquelyReferenced</code> is an O(1) check on the ARC reference count. If the count is 1, meaning no other variable holds this storage, the mutation happens in place with zero allocation.</p>
+
+<h2 id="this-is-about-semantics-not-struct-vs-class">This is about semantics, not struct vs class</h2>
+
+<p>The struct still has <strong>value semantics</strong>. Two variables holding the same <code class="language-plaintext highlighter-rouge">HeavyCOWStruct</code> are independent values. Mutating one does not affect the other:</p>
+
+<div class="language-swift highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">var</span> <span class="nv">a</span> <span class="o">=</span> <span class="kt">HeavyCOWStruct</span><span class="p">(</span><span class="nv">name</span><span class="p">:</span> <span class="s">"Swift"</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+<span class="k">let</span> <span class="nv">b</span> <span class="o">=</span> <span class="n">a</span>                 <span class="c1">// b._storage === a._storage — shared, 1 ARC retain</span>
+<span class="n">a</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="s">"Performance"</span>    <span class="c1">// new Storage only if b is still alive</span>
+<span class="c1">// a.name == "Performance", b.name == "Swift"</span>
+</code></pre></div></div>
+
+<p>If you used a plain <code class="language-plaintext highlighter-rouge">class</code> instead, <code class="language-plaintext highlighter-rouge">b</code> would reflect the mutation. CoW gives you the copy safety of a struct with the copy efficiency of a class, but it is <strong>not free</strong>. Every mutating property setter pays the <code class="language-plaintext highlighter-rouge">isKnownUniquelyReferenced</code> check, and when storage is shared, it pays a full allocation.</p>
+
+<h2 id="the-benchmark">The benchmark</h2>
+
+<p>To measure the difference, I ran two tests, a copy followed by a mutation on both versions. Each test was run with <code class="language-plaintext highlighter-rouge">-c release</code> to get optimized builds.</p>
+
+<p><strong>Results:</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Version</th>
+      <th>Time per operation</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">HeavyStruct</code> (plain)</td>
+      <td>7.42 µs</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">HeavyCOWStruct</code> (CoW)</td>
+      <td>5.40 µs</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>CoW was ~27% faster.</strong></p>
+
+<p>The mutation makes the difference clear. The plain struct is fully copied at assignment (all 10 ARC retains), then mutated in place. The CoW struct pays only 1 ARC retain at assignment. The mutation checks <code class="language-plaintext highlighter-rouge">isKnownUniquelyReferenced</code> and because <code class="language-plaintext highlighter-rouge">original</code> is no longer in use at that point, the reference count is 1, so no <code class="language-plaintext highlighter-rouge">Storage.copy()</code> is needed. The mutation happens in place.</p>
+
+<p>CoW wins both steps: cheaper copy, free mutation.</p>
+
+<h2 id="when-cow-does-not-help">When CoW does not help</h2>
+
+<p>CoW is not always the right choice. It adds overhead when:</p>
+
+<p><strong>Mutations are frequent with shared owners.</strong> If two variables hold the same CoW struct and you mutate through one of them, <code class="language-plaintext highlighter-rouge">Storage.copy()</code> runs a full heap allocation of all fields. This is more expensive than a plain struct mutation.</p>
+
+<p><strong>Fields are small scalars.</strong> A struct with <code class="language-plaintext highlighter-rouge">Bool</code>, <code class="language-plaintext highlighter-rouge">Int</code>, and <code class="language-plaintext highlighter-rouge">Float</code> fields has nothing to gain. There are no heap references to consolidate. The struct copies by value directly.</p>
+
+<p><strong>Instances are always freshly constructed.</strong> CoW shares storage between copies of the <em>same instance</em>. If every use of the struct calls <code class="language-plaintext highlighter-rouge">init</code>, there is never a shared storage to benefit from.</p>
+
+<p><strong>Property access is in a tight loop.</strong> Every read goes through <code class="language-plaintext highlighter-rouge">_storage.field</code> an extra pointer indirection compared to a plain struct. For a type accessed thousands of times per frame, this adds up.</p>
+
+<h2 id="advice">Advice</h2>
+
+<blockquote>
+  <p>Use CoW when a struct has many reference-type fields, is frequently copied, and mutations either don’t happen or happen while the copy is the sole owner. Skip it for small structs, scalar-heavy types, or anything mutated in a tight loop with shared owners.</p>
+</blockquote>
+
+<p>The data, not the pattern should drive the decision.</p>
+
+<h2 id="further-reading">Further reading</h2>
+
+<ul>
+  <li><a href="https://github.com/apple/swift-nio-examples/blob/main/http2-client/Sources/http2-client/Types.swift#L22">CoW in practice: swift-nio-examples</a>: A real-world example from Apple’s SwiftNIO team showing how CoW-backed value types are used in production networking code.</li>
+  <li><a href="https://www.youtube.com/watch?v=iLDldae64xE">High-Performance Systems In Swift</a>: Apple engineer, Johannes Weiss from the SwiftNIO team, walks through the performance model for value types, reference types and the gradual steps to a high performant system. Essential context for every decision covered in this article.</li>
+</ul>
+
+  </div>
+</article>
+
+  </main>
+  <footer class="site-footer">
+  <p>
+    © 2026 Swift Performance &nbsp;·&nbsp;
+    <a href="https://github.com/PARAIPAN9" target="_blank" rel="noopener">GitHub</a>
+  </p>
+</footer>
+
+</body>
+</html>
