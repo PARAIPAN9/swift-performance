@@ -1,0 +1,14 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="128" cy="128" r="128" fill="#F5F4F0"/>
+  <text
+    x="128" y="155"
+    font-family="Georgia, 'Times New Roman', serif"
+    font-size="110"
+    font-weight="700"
+    fill="#FF5F1F"
+    text-anchor="middle"
+    dominant-baseline="auto"
+    letter-spacing="-4"
+  >SP</text>
+  <circle cx="196" cy="48" r="10" fill="#E63500"/>
+</svg>

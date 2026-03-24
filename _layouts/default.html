@@ -6,6 +6,8 @@
   <title>{% if page.title %}{{ page.title }} · {{ site.title }}{% else %}{{ site.title }}{% endif %}</title>
   <meta name="description" content="{% if page.description %}{{ page.description }}{% else %}{{ site.description }}{% endif %}">
   <link rel="stylesheet" href="{{ "/assets/css/main.css" | relative_url }}">
+  <link rel="icon" type="image/svg+xml" href="{{ "/assets/sp-badge-dark.svg" | relative_url }}" media="(prefers-color-scheme: dark)">
+  <link rel="icon" type="image/svg+xml" href="{{ "/assets/sp-badge-light.svg" | relative_url }}" media="(prefers-color-scheme: light)">
   {% feed_meta %}
   {% seo %}
 </head>
