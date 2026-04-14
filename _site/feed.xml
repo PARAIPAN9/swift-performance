@@ -1,4 +1,104 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-03-24T19:04:38+01:00</updated><id>http://localhost:4000/feed.xml</id><title type="html">Swift Performance</title><subtitle>In-depth articles on Swift performance — ARC, value types, concurrency, and compiler optimizations.</subtitle><author><name>Paraipan</name></author><entry><title type="html">Copy-on-Write: It’s Not About Struct vs Class</title><link href="http://localhost:4000/2026/03/23/copy-on-write-its-not-about-struct-vs-class/" rel="alternate" type="text/html" title="Copy-on-Write: It’s Not About Struct vs Class" /><published>2026-03-23T00:00:00+01:00</published><updated>2026-03-23T00:00:00+01:00</updated><id>http://localhost:4000/2026/03/23/copy-on-write-its-not-about-struct-vs-class</id><content type="html" xml:base="http://localhost:4000/2026/03/23/copy-on-write-its-not-about-struct-vs-class/">&lt;p&gt;A common misconception in Swift performance discussions is that copy-on-write is a way to make structs behave like classes for performance. It isn’t. CoW is a &lt;strong&gt;semantics decision&lt;/strong&gt;. You’re choosing when storage is duplicated, not choosing between value and reference semantics.&lt;/p&gt;
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator><link href="http://localhost:4000/swift-performance/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/swift-performance/" rel="alternate" type="text/html" /><updated>2026-04-14T17:58:30+02:00</updated><id>http://localhost:4000/swift-performance/feed.xml</id><title type="html">Swift Performance</title><subtitle>In-depth articles on Swift performance — ARC, value types, concurrency, and compiler optimizations.</subtitle><author><name>Paraipan</name></author><entry><title type="html">Swizzling: Debugging the First Responder Chain</title><link href="http://localhost:4000/swift-performance/2026/04/03/swizzling-debugging-first-responder/" rel="alternate" type="text/html" title="Swizzling: Debugging the First Responder Chain" /><published>2026-04-03T00:00:00+02:00</published><updated>2026-04-03T00:00:00+02:00</updated><id>http://localhost:4000/swift-performance/2026/04/03/swizzling-debugging-first-responder</id><content type="html" xml:base="http://localhost:4000/swift-performance/2026/04/03/swizzling-debugging-first-responder/">&lt;p&gt;Sometimes a bug lives entirely in behaviour you cannot set a breakpoint on. The first responder chain is one of those places. UIKit moves focus across responders silently: no delegate, no notification by default, no easy way to know who called &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;becomeFirstResponder&lt;/code&gt; or when.&lt;/p&gt;
+
+&lt;p&gt;This is a case where method swizzling is the right tool.&lt;/p&gt;
+
+&lt;h2 id=&quot;what-swizzling-is&quot;&gt;What swizzling is&lt;/h2&gt;
+
+&lt;p&gt;Swizzling is a runtime technique from the Objective-C world. Every Objective-C method is just an entry in a method table, a mapping from selector to function pointer. The runtime exposes &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;method_exchangeImplementations&lt;/code&gt;, which swaps two entries in that table.&lt;/p&gt;
+
+&lt;p&gt;After the swap, calling the original selector runs your replacement function. Calling the replacement selector runs the original function. This is the core trick that makes swizzling work.&lt;/p&gt;
+
+&lt;p&gt;In Swift, you can only swizzle methods that are visible to the Objective-C runtime. That means methods on &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;NSObject&lt;/code&gt; subclasses, or methods annotated with &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;@objc&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;UIResponder&lt;/code&gt; is an &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;NSObject&lt;/code&gt; subclass, so every method on it, including &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;becomeFirstResponder&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;resignFirstResponder&lt;/code&gt;, is swizzleable.&lt;/p&gt;
+
+&lt;h2 id=&quot;the-strange-behaviour&quot;&gt;The strange behaviour&lt;/h2&gt;
+
+&lt;p&gt;I was investigating some unexpected focus behaviour in an app that embeds a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;WKWebView&lt;/code&gt;. Things were not working as expected: focus was moving in a way that did not match what the code was doing, and I could not tell which part of the hierarchy was actually first responder at any given moment.&lt;/p&gt;
+
+&lt;p&gt;The tricky part with &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;WKWebView&lt;/code&gt; is that it manages its own internal view hierarchy, including &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;WKContentView&lt;/code&gt;, a private WebKit view that actually holds the first responder when the web content is focused. You cannot inspect this easily, and there is no delegate or notification that tells you when it takes or releases focus.&lt;/p&gt;
+
+&lt;p&gt;I needed to see the full sequence of responder transitions across the entire app, including those private views.&lt;/p&gt;
+
+&lt;h2 id=&quot;the-swizzle&quot;&gt;The swizzle&lt;/h2&gt;
+
+&lt;p&gt;I added an extension on &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;UIResponder&lt;/code&gt;:&lt;/p&gt;
+
+&lt;div class=&quot;language-swift highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kd&quot;&gt;extension&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;UIResponder&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+
+    &lt;span class=&quot;kd&quot;&gt;static&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;func&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;swizzleBecomeFirstResponder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;originalBecome&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;class_getInstanceMethod&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;UIResponder&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;#selector(&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;becomeFirstResponder&lt;/span&gt;&lt;span class=&quot;kd&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;swizzledBecome&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;class_getInstanceMethod&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;UIResponder&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;#selector(&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;swizzled_becomeFirstResponder&lt;/span&gt;&lt;span class=&quot;kd&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;original&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;originalBecome&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;swizzled&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;swizzledBecome&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+            &lt;span class=&quot;nf&quot;&gt;method_exchangeImplementations&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;original&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;swizzled&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+        &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+    &lt;span class=&quot;kd&quot;&gt;@objc&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;func&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;swizzled_becomeFirstResponder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;Bool&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;nf&quot;&gt;print&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;---&amp;gt; becomeFirstResponder: &lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\(&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;type&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;of&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;swizzled_becomeFirstResponder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;The key detail is the recursive-looking call inside &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;swizzled_becomeFirstResponder&lt;/code&gt;. After &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;method_exchangeImplementations&lt;/code&gt; runs, the selector &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;swizzled_becomeFirstResponder&lt;/code&gt; points to the &lt;em&gt;original&lt;/em&gt; &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;becomeFirstResponder&lt;/code&gt; implementation. So calling &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;swizzled_becomeFirstResponder()&lt;/code&gt; from within the replacement is not infinite recursion. It is the call to the original method. This is the standard swizzling pattern.&lt;/p&gt;
+
+&lt;p&gt;I activated it in &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;AppDelegate&lt;/code&gt;, before the window is shown:&lt;/p&gt;
+
+&lt;div class=&quot;language-swift highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kd&quot;&gt;func&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;application&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;_&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;application&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;UIApplication&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                 &lt;span class=&quot;n&quot;&gt;didFinishLaunchingWithOptions&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;launchOptions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;UIApplication&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;LaunchOptionsKey&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;Any&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]?)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;Bool&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;kt&quot;&gt;UIResponder&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;swizzleBecomeFirstResponder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;kc&quot;&gt;true&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;I added an equivalent swizzle for &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;resignFirstResponder&lt;/code&gt; to get the full picture.&lt;/p&gt;
+
+&lt;h2 id=&quot;what-the-output-revealed&quot;&gt;What the output revealed&lt;/h2&gt;
+
+&lt;p&gt;With the swizzle in place, the console printed every responder transition in order:&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;---&amp;gt; becomeFirstResponder: RootNavigationController
+---&amp;gt; becomeFirstResponder: BrowserWindow
+---&amp;gt; becomeFirstResponder: LaunchScreenViewController
+---&amp;gt; resignFirstResponder: LocationView
+---&amp;gt; resignFirstResponder: LocationView
+---&amp;gt; becomeFirstResponder: BrowserViewController
+---&amp;gt; becomeFirstResponder: WKContentView
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;This immediately gave me a complete picture of the hierarchy and the sequence of events, something that would have been impossible to reconstruct from breakpoints alone.&lt;/p&gt;
+
+&lt;p&gt;One thing this technique is particularly useful for with &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;WKWebView&lt;/code&gt; is confirming whether &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;WKContentView&lt;/code&gt; is becoming first responder or not. &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;WKContentView&lt;/code&gt; is a private class, so you cannot reference it directly in code or set a targeted breakpoint on it. But because the swizzle is on &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;UIResponder&lt;/code&gt;, the base class for the entire responder chain, it catches everything, including private UIKit internals. If &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;WKContentView&lt;/code&gt; takes focus, it shows up in the log like any other class.&lt;/p&gt;
+
+&lt;p&gt;Without the swizzle, none of this sequence was visible. The log turned an opaque focus problem into a readable timeline.&lt;/p&gt;
+
+&lt;h2 id=&quot;when-to-reach-for-this&quot;&gt;When to reach for this&lt;/h2&gt;
+
+&lt;p&gt;Swizzling is not a tool you leave in production code. It changes global behaviour for every instance of a class, in every part of the app, for the lifetime of the process. That is too broad for anything except a debugging session.&lt;/p&gt;
+
+&lt;p&gt;The right workflow:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;Add the swizzle behind a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;#if DEBUG&lt;/code&gt; block, or simply in a debug branch&lt;/li&gt;
+  &lt;li&gt;Reproduce the bug and read the log&lt;/li&gt;
+  &lt;li&gt;Fix the root cause&lt;/li&gt;
+  &lt;li&gt;Remove the swizzle entirely before shipping&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;There is also a correctness requirement: swizzling must happen exactly once per method. Calling &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;method_exchangeImplementations&lt;/code&gt; twice on the same pair restores the original state, effectively a no-op. If you call it from multiple places or inside code that runs more than once, you will get unpredictable results. Using &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;AppDelegate.application(_:didFinishLaunchingWithOptions:)&lt;/code&gt; is a safe call site because it runs exactly once.&lt;/p&gt;
+
+&lt;h2 id=&quot;what-to-reach-for-first&quot;&gt;What to reach for first&lt;/h2&gt;
+
+&lt;p&gt;Before swizzling, check the cheaper options:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;UIApplication.shared.keyWindow?.perform(#selector(UIResponder.resignFirstResponder))&lt;/code&gt; to manually clear focus&lt;/li&gt;
+  &lt;li&gt;A recursive walk of the view hierarchy that checks &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;isFirstResponder&lt;/code&gt;&lt;/li&gt;
+  &lt;li&gt;Breakpoint on &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;becomeFirstResponder&lt;/code&gt; in Xcode’s symbolic breakpoint list.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;Swizzling is the right choice when the problem spans multiple classes, involves a sequence of events, or is too fast to catch with a debugger. For a first responder bug that crosses view controllers and windows, it was the right call.&lt;/p&gt;</content><author><name>Paraipan</name></author><category term="Debugging" /><category term="Runtime" /><category term="UIKit" /><summary type="html">Sometimes a bug lives entirely in behaviour you cannot set a breakpoint on. The first responder chain is one of those places. UIKit moves focus across responders silently: no delegate, no notification by default, no easy way to know who called becomeFirstResponder or when.</summary></entry><entry><title type="html">Copy-on-Write: It’s Not About Struct vs Class</title><link href="http://localhost:4000/swift-performance/2026/03/23/copy-on-write-its-not-about-struct-vs-class/" rel="alternate" type="text/html" title="Copy-on-Write: It’s Not About Struct vs Class" /><published>2026-03-23T00:00:00+01:00</published><updated>2026-03-23T00:00:00+01:00</updated><id>http://localhost:4000/swift-performance/2026/03/23/copy-on-write-its-not-about-struct-vs-class</id><content type="html" xml:base="http://localhost:4000/swift-performance/2026/03/23/copy-on-write-its-not-about-struct-vs-class/">&lt;p&gt;A common misconception in Swift performance discussions is that copy-on-write is a way to make structs behave like classes for performance. It isn’t. CoW is a &lt;strong&gt;semantics decision&lt;/strong&gt;. You’re choosing when storage is duplicated, not choosing between value and reference semantics.&lt;/p&gt;
 
 &lt;p&gt;This article walks through a concrete implementation, explains what happens at the ARC level, and backs every claim with benchmark data.&lt;/p&gt;
 
