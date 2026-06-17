@@ -1,4 +1,106 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator><link href="http://localhost:4000/swift-performance/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/swift-performance/" rel="alternate" type="text/html" /><updated>2026-04-14T17:58:30+02:00</updated><id>http://localhost:4000/swift-performance/feed.xml</id><title type="html">Swift Performance</title><subtitle>In-depth articles on Swift performance — ARC, value types, concurrency, and compiler optimizations.</subtitle><author><name>Paraipan</name></author><entry><title type="html">Swizzling: Debugging the First Responder Chain</title><link href="http://localhost:4000/swift-performance/2026/04/03/swizzling-debugging-first-responder/" rel="alternate" type="text/html" title="Swizzling: Debugging the First Responder Chain" /><published>2026-04-03T00:00:00+02:00</published><updated>2026-04-03T00:00:00+02:00</updated><id>http://localhost:4000/swift-performance/2026/04/03/swizzling-debugging-first-responder</id><content type="html" xml:base="http://localhost:4000/swift-performance/2026/04/03/swizzling-debugging-first-responder/">&lt;p&gt;Sometimes a bug lives entirely in behaviour you cannot set a breakpoint on. The first responder chain is one of those places. UIKit moves focus across responders silently: no delegate, no notification by default, no easy way to know who called &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;becomeFirstResponder&lt;/code&gt; or when.&lt;/p&gt;
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator><link href="http://localhost:4000/swift-performance/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/swift-performance/" rel="alternate" type="text/html" /><updated>2026-06-17T14:26:03+02:00</updated><id>http://localhost:4000/swift-performance/feed.xml</id><title type="html">Swift Performance</title><subtitle>In-depth articles on Swift performance — ARC, value types, concurrency, and compiler optimizations.</subtitle><author><name>Paraipan</name></author><entry><title type="html">Understanding App Launch</title><link href="http://localhost:4000/swift-performance/2026/06/17/understanding-app-launch/" rel="alternate" type="text/html" title="Understanding App Launch" /><published>2026-06-17T00:00:00+02:00</published><updated>2026-06-17T00:00:00+02:00</updated><id>http://localhost:4000/swift-performance/2026/06/17/understanding-app-launch</id><content type="html" xml:base="http://localhost:4000/swift-performance/2026/06/17/understanding-app-launch/">&lt;p&gt;App launch is a user experience interruption, as Apple puts it. It is the moment our user is waiting on us, before they can do anything else.&lt;/p&gt;
+
+&lt;h2 id=&quot;why-it-matters&quot;&gt;Why it matters&lt;/h2&gt;
+
+&lt;p&gt;Our app’s launch is our user’s first experience with our app, and as such it should be delightful. It is also important to test on older devices, to make sure the experience holds up across a broad set of users with different device capabilities. A launch that feels fast on the latest hardware can feel sluggish on a device that is a few years old.&lt;/p&gt;
+
+&lt;h2 id=&quot;launch-types&quot;&gt;Launch types&lt;/h2&gt;
+
+&lt;p&gt;There are three kinds of launch, and they differ by how much of our app is already resident in memory.&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;strong&gt;Cold:&lt;/strong&gt;
+    &lt;ul&gt;
+      &lt;li&gt;Happens after a reboot.&lt;/li&gt;
+      &lt;li&gt;The app is not in memory.&lt;/li&gt;
+      &lt;li&gt;No process exists. Basically, the app was not launched in a very long time.&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Warm:&lt;/strong&gt; after a cold launch has happened, every kill and relaunch of the app is a warm launch.
+    &lt;ul&gt;
+      &lt;li&gt;The app was recently terminated.&lt;/li&gt;
+      &lt;li&gt;The app is partially in memory.&lt;/li&gt;
+      &lt;li&gt;No process exists.&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Resume:&lt;/strong&gt; this is when the app is in the background and the user re-enters it from the home screen or the app switcher.
+    &lt;ul&gt;
+      &lt;li&gt;The app is suspended.&lt;/li&gt;
+      &lt;li&gt;The app is fully in memory.&lt;/li&gt;
+      &lt;li&gt;The process exists.&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;the-400ms-target&quot;&gt;The 400ms target&lt;/h2&gt;
+
+&lt;p&gt;Apple says that to achieve a responsive cold launch, we should aim for roughly 400ms to render the first frame. That way we have pixels displayed to the user during the launch animation, and by the time that launch animation completes, the app is interactive and responsive.&lt;/p&gt;
+
+&lt;p&gt;I believe that is a very optimistic case, and it depends on the size of the app and other factors. But of course we can still find ways to reduce app launch time and aim for the lowest possible value.&lt;/p&gt;
+
+&lt;p&gt;To reduce app launch time, it is important to understand what happens during launch.&lt;/p&gt;
+
+&lt;p&gt;Launch generally starts when the user taps our icon on the home screen. Then, over the next 100 or so milliseconds, iOS does the necessary system-side work to initialize our app. That leaves us developers about 300 milliseconds to create our views, load our content, and generate the first frame.&lt;/p&gt;
+
+&lt;h2 id=&quot;the-phases-of-an-app-launch&quot;&gt;The phases of an app launch&lt;/h2&gt;
+
+&lt;p&gt;The launch flows through these phases:&lt;/p&gt;
+
+&lt;div style=&quot;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:1.5em 0;font-size:0.9em;font-weight:600;line-height:1.6;&quot;&gt;
+  &lt;span style=&quot;background:#5856d6;color:#fff;padding:6px 12px;border-radius:8px;white-space:nowrap;&quot;&gt;System Interface&lt;/span&gt;
+  &lt;span style=&quot;color:#6e6e73;&quot;&gt;→&lt;/span&gt;
+  &lt;span style=&quot;background:#0071e3;color:#fff;padding:6px 12px;border-radius:8px;white-space:nowrap;&quot;&gt;Runtime Init&lt;/span&gt;
+  &lt;span style=&quot;color:#6e6e73;&quot;&gt;→&lt;/span&gt;
+  &lt;span style=&quot;background:#34c759;color:#fff;padding:6px 12px;border-radius:8px;white-space:nowrap;&quot;&gt;UIKit Init&lt;/span&gt;
+  &lt;span style=&quot;color:#6e6e73;&quot;&gt;→&lt;/span&gt;
+  &lt;span style=&quot;background:#ff9500;color:#fff;padding:6px 12px;border-radius:8px;white-space:nowrap;&quot;&gt;Application Init&lt;/span&gt;
+  &lt;span style=&quot;color:#6e6e73;&quot;&gt;→&lt;/span&gt;
+  &lt;span style=&quot;background:#ff2d55;color:#fff;padding:6px 12px;border-radius:8px;white-space:nowrap;&quot;&gt;Initial Frame Render&lt;/span&gt;
+  &lt;span style=&quot;color:#6e6e73;&quot;&gt;→&lt;/span&gt;
+  &lt;span style=&quot;background:#8e8e93;color:#fff;padding:6px 12px;border-radius:8px;white-space:nowrap;&quot;&gt;Extended&lt;/span&gt;
+&lt;/div&gt;
+
+&lt;h3 id=&quot;1-system-interface&quot;&gt;1. System Interface&lt;/h3&gt;
+
+&lt;p&gt;DYLD, the dynamic linker, loads our shared libraries and frameworks. For an in-depth analysis, watch this presentation: &lt;a href=&quot;https://www.youtube.com/watch?v=p-dvAOHlLEc&quot;&gt;A tale of dyld, and how iOS launches your app&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;This is a section we can hardly influence, because it is system work. But we can influence it by avoiding dynamic library loading so we can make use of dyld3, which caches runtime dependencies and warm launches, which improves app launch performance.&lt;/p&gt;
+
+&lt;h3 id=&quot;2-runtime-init&quot;&gt;2. Runtime Init&lt;/h3&gt;
+
+&lt;p&gt;This is when the system initializes the Objective-C and Swift runtimes.&lt;/p&gt;
+
+&lt;p&gt;We cannot do much here either, except avoid static initializations and frameworks that use static initialization. But if we must use static initialization, we should consider moving code out of class load, which is invoked every time during launch, into class initialize, which is lazily invoked the first time we use a method within our class.&lt;/p&gt;
+
+&lt;h3 id=&quot;3-uikit-init&quot;&gt;3. UIKit Init&lt;/h3&gt;
+
+&lt;p&gt;This is when the system instantiates our &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;UIApplication&lt;/code&gt; and our &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;UIApplicationDelegate&lt;/code&gt;. For the most part, this is system-side work: setting up event processing and integration with the system. But we can still affect this phase if we subclass &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;UIApplication&lt;/code&gt; or do any work in &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;UIApplicationDelegate&lt;/code&gt; initializers.&lt;/p&gt;
+
+&lt;h3 id=&quot;4-application-init&quot;&gt;4. Application Init&lt;/h3&gt;
+
+&lt;p&gt;This is where we can have the most impact on our app launch time. Nowadays everyone is using &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;UIScene&lt;/code&gt;s, so it is important to create our view controllers only in &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;scene(_:willConnectTo:options:)&lt;/code&gt; and not also in &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;application(_:didFinishLaunchingWithOptions:)&lt;/code&gt;. Doing both leads to a common pitfall that results in performance losses and, likely, unpredictable bugs in our code base.&lt;/p&gt;
+
+&lt;h3 id=&quot;5-frame-render&quot;&gt;5. Frame Render&lt;/h3&gt;
+
+&lt;p&gt;This one is relatively straightforward. This is when we create our views, perform layout, and then draw them: &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;loadView&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;viewDidLoad&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;layoutSubviews&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;We can affect this phase by reducing the number of views in our hierarchy. We can do that by flattening our views to use fewer of them, or by lazily loading views that are not shown during launch. We should also take a look at our Auto Layout and see if we can reduce the number of constraints we are using.&lt;/p&gt;
+
+&lt;h3 id=&quot;6-extended&quot;&gt;6. Extended&lt;/h3&gt;
+
+&lt;p&gt;This is the app-specific period from our first commit until we show our final frame to the user. This is when we load the asynchronous data. Not every app has this phase. During it, the app should be interactive and responsive.&lt;/p&gt;
+
+&lt;h2 id=&quot;how-do-we-know-we-need-improvements&quot;&gt;How do we know we need improvements?&lt;/h2&gt;
+
+&lt;p&gt;How do we know we need to make our app launch faster? We of course need to measure first the app launch under certain conditions and in a certain states. I will leave that topic for another article, because I wanted to keep this one short and concise.&lt;/p&gt;
+
+&lt;p&gt;Thanks for reading. If you found it helpful, you can share it with others.&lt;/p&gt;
+
+&lt;h2 id=&quot;useful-link&quot;&gt;Useful link&lt;/h2&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;a href=&quot;https://developer.apple.com/videos/play/wwdc2019/423/&quot;&gt;WWDC19 - Optimizing App Launch&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;</content><author><name>Paraipan</name></author><category term="App Launch" /><category term="Performance" /><category term="UIKit" /><summary type="html">App launch is a user experience interruption, as Apple puts it. It is the moment our user is waiting on us, before they can do anything else.</summary></entry><entry><title type="html">Swizzling: Debugging the First Responder Chain</title><link href="http://localhost:4000/swift-performance/2026/04/03/swizzling-debugging-first-responder/" rel="alternate" type="text/html" title="Swizzling: Debugging the First Responder Chain" /><published>2026-04-03T00:00:00+02:00</published><updated>2026-04-03T00:00:00+02:00</updated><id>http://localhost:4000/swift-performance/2026/04/03/swizzling-debugging-first-responder</id><content type="html" xml:base="http://localhost:4000/swift-performance/2026/04/03/swizzling-debugging-first-responder/">&lt;p&gt;Sometimes a bug lives entirely in behaviour you cannot set a breakpoint on. The first responder chain is one of those places. UIKit moves focus across responders silently: no delegate, no notification by default, no easy way to know who called &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;becomeFirstResponder&lt;/code&gt; or when.&lt;/p&gt;
 
 &lt;p&gt;This is a case where method swizzling is the right tool.&lt;/p&gt;
 
